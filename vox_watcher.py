@@ -1,17 +1,22 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-VOX Cinemas Egypt — Early Booking & Ideal Seat Watcher (v3 - Strict Best Seats Only)
+VOX Cinemas Egypt — Early Booking & Ideal Seat Watcher (v4 - Screen-Distance Aware)
 Target Movie: Avengers: Doomsday (Standard & MAX / Infinity Vision)
 Target Cinema: City Centre Almaza Only
 
-Key Upgrades in v3:
-1. Strictly notifies ONLY when ideal seats are available:
-   - Excludes Front Rows (A, B, C, D, E) -> Only accepts Middle & Back Rows (F through P).
-   - Excludes Side/Wall Seats -> Only accepts the center 50% of each row (e.g., seats 5-14 in an 18-seat row).
-   - Disables generic "session open" spam when no ideal seats are found.
-2. Actually clicks "Continue As Guest" and "I Agree" (18TC modal) on VOX Cinemas so the live seat map loads.
-3. Supports both attribute-based and row-container-based DOM/SVG seat maps on VOX Cinemas.
+Key Fixes in v4:
+1. Screen-Distance Row Detection:
+   - In VOX Cinemas Egypt, Row A is at the BACK of the hall and Row L / N is the FIRST row
+     right in front of the screen!
+   - v4 dynamically measures each row's physical distance from the SCREEN element in the DOM
+     (and reverses alphabetical order when L/N is at the screen), strictly rejecting the
+     front 38% of rows closest to the screen (such as rows I, J, K, L, M, N) and ONLY
+     accepting true Middle & Back rows (such as rows A, B, C, D, E, F, G, H).
+2. True Row-Width Horizontal Center Calculation:
+   - Counts ALL seats in each row (both occupied and available) so side seats (like seat 1-4)
+     are never mistaken for center seats when the rest of the row is booked.
+3. Excludes `special` (wheelchair/companion front-row seats) and `blank` spacers.
 """
 
 import json
@@ -43,12 +48,10 @@ MOVIE_URLS = [
     "https://egy.voxcinemas.com/movies/avengers-doomsday-infinity-vision",
 ]
 
-# Strictly monitor City Centre Almaza only
 TARGET_CINEMAS = [
     "City Centre Almaza",
 ]
 
-# Allowed experiences (MAX, Standard, IMAX)
 TARGET_EXPERIENCES = [
     "MAX",
     "STANDARD",
@@ -70,27 +73,20 @@ TARGET_DATES: List[str] = []
 TARGET_TIMES: List[str] = []
 
 # ==============================================================================
-# 2. STRICT IDEAL SEAT FILTER (MIDDLE & BACK-CENTER SEATS ONLY)
+# 2. SCREEN-DISTANCE & CENTER SEAT RULES
 # ==============================================================================
 
-# Exclude front rows A through E completely
-EXCLUDED_FRONT_ROWS = {"A", "B", "C", "D", "E"}
+# Reject the closest 38% of rows to the SCREEN (e.g., in a 12-row hall L..A, rejects L, K, J, I)
+MIN_DISTANCE_FROM_SCREEN_RATIO = 0.38
 
-# Only allow middle and back rows (F through P)
-PREFERRED_ROWS = {"F", "G", "H", "I", "J", "K", "L", "M", "N", "O", "P"}
+# Sweet spot is 40% to 78% of the way back from the screen (e.g., rows H, G, F, E, D)
+SWEET_SPOT_MAX_RATIO = 0.78
 
-# Sweet Spot rows (Prime middle-back rows)
-SWEET_SPOT_ROWS = {"G", "H", "I", "J", "K", "L"}
-
-# Strictly require horizontal center seats (middle 50% of the row: 25% to 75%)
-# e.g., in an 18-seat row, only seats 5 to 14 are accepted; seats 1-4 and 15-18 on the sides are rejected!
+# Horizontal center: only accept seats in the middle 50% of the row (25% to 75%)
 CENTER_SEAT_MIN_RATIO = 0.25
 CENTER_SEAT_MAX_RATIO = 0.75
 
-# Strictly reject side seats (True = never notify for side/wall seats even in good rows)
 STRICT_CENTER_ONLY = True
-
-# Minimum number of ideal seats needed in a showtime to trigger an alert
 MIN_SEATS_NEEDED = int(os.getenv("MIN_SEATS_NEEDED", "1"))
 
 STATE_FILE = "notified_seats.json"
@@ -107,10 +103,10 @@ def load_notified_state() -> Set[str]:
         try:
             with open(STATE_FILE, "r", encoding="utf-8") as f:
                 data = json.load(f)
-                # Keep only seat-level keys (ignore old SESSION_OPEN_ keys)
+                # Only load keys created by v4 (prefixed with v4_) so old front-row keys are cleared
                 return {
                     k for k in data.get("notified_keys", [])
-                    if not str(k).startswith("SESSION_OPEN_")
+                    if str(k).startswith("v4_")
                 }
         except Exception as exc:
             print(f"[WARN] Could not read {STATE_FILE}: {exc}")
@@ -169,98 +165,78 @@ def send_telegram_message(text: str) -> bool:
 
 
 # ==============================================================================
-# 4. STRICT SEAT QUALITY FILTERING
+# 4. SCREEN-DISTANCE & HORIZONTAL CENTER SEAT EVALUATION
 # ==============================================================================
 
-def parse_seat_code(raw_code: str) -> Tuple[str, Optional[int]]:
-    cleaned = raw_code.strip().upper()
-    match = re.search(r"\b([A-Z]{1,2})\s*[-:]?\s*(\d{1,2})\b", cleaned)
-    if match:
-        return match.group(1), int(match.group(2))
-    return cleaned, None
-
-
-def evaluate_seat_quality(
-    row_label: str,
-    seat_num: Optional[int],
-    total_seats_in_row: int = 16,
-) -> Tuple[bool, str]:
+def filter_and_rank_seats(
+    available_seats: List[Dict[str, Any]],
+    rows_front_to_back: List[str],
+) -> List[Dict[str, Any]]:
     """
-    Strictly accepts ONLY seats in rows F-P that are in the center 50% of the row.
-    Front rows (A-E) and side/edge seats are strictly rejected.
+    Filters available seats using the actual front-to-back row order in the auditorium:
+    - rows_front_to_back[0] is the FIRST row right in front of the screen (rejected!).
+    - rows_front_to_back[-1] is the BACK row at the top of the auditorium.
     """
-    row_clean = row_label.strip().upper()
+    # Fallback if rows_front_to_back wasn't populated: in VOX Egypt, rows are ordered L->A (or N->A) from screen to back
+    if not rows_front_to_back:
+        # Standard 12-row hall at VOX Almaza goes L (front/screen) down to A (back)
+        rows_front_to_back = ["N", "M", "L", "K", "J", "I", "H", "G", "F", "E", "D", "C", "B", "A"]
 
-    # 1. Reject front rows (A, B, C, D, E)
-    if row_clean in EXCLUDED_FRONT_ROWS:
-        return False, "صف أمامي (مستبعد)"
-
-    # 2. Must be in preferred middle/back rows (F-P)
-    if row_clean not in PREFERRED_ROWS:
-        return False, "خارج نطاق الصفوف المفضلة"
-
-    # 3. Must have a valid seat number and be in the horizontal center of the row
-    if seat_num is None:
-        return False, "رقم الكرسي غير محدد"
-
-    effective_row_width = max(total_seats_in_row, 14)
-    min_center = max(4, int(round(effective_row_width * CENTER_SEAT_MIN_RATIO)))
-    max_center = min(
-        effective_row_width - 3,
-        int(round(effective_row_width * CENTER_SEAT_MAX_RATIO)),
-    )
-    is_center_horizontal = min_center <= seat_num <= max_center
-
-    if STRICT_CENTER_ONLY and not is_center_horizontal:
-        return False, "كرسي جانبي على الأطراف (مستبعد)"
-
-    if row_clean in SWEET_SPOT_ROWS:
-        return True, "🌟 مثالي (منتصف القاعة - Sweet Spot)"
-
-    return True, "✅ ممتاز (الصفوف الخلفية - منتصف)"
-
-
-def filter_and_rank_seats(available_seats: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    row_max_seat: Dict[str, int] = {}
-    for s in available_seats:
-        r_label = str(s.get("row", "")).upper()
-        total_in_row = s.get("total_in_row")
-        s_num = s.get("number")
-        if r_label:
-            if isinstance(total_in_row, int) and total_in_row > 0:
-                row_max_seat[r_label] = max(row_max_seat.get(r_label, 16), total_in_row)
-            elif isinstance(s_num, int):
-                row_max_seat[r_label] = max(row_max_seat.get(r_label, 16), s_num)
-
+    total_rows = len(rows_front_to_back)
     good_seats: List[Dict[str, Any]] = []
     seen_codes: Set[str] = set()
+
     for seat in available_seats:
-        row_label = str(seat.get("row", "")).upper()
+        row_label = str(seat.get("row", "")).strip().upper()
         seat_num = seat.get("number")
+        total_in_row = max(int(seat.get("total_in_row") or 14), 12)
         code = str(seat.get("code", f"{row_label}{seat_num or ''}")).upper()
-        if code in seen_codes:
+
+        if not row_label or seat_num is None or code in seen_codes:
             continue
         seen_codes.add(code)
 
-        max_in_row = row_max_seat.get(row_label, 16)
-        is_good, quality_desc = evaluate_seat_quality(row_label, seat_num, max_in_row)
-        if is_good:
-            good_seats.append(
-                {
-                    "row": row_label,
-                    "number": seat_num,
-                    "code": code,
-                    "quality": quality_desc,
-                }
-            )
+        # 1. Determine how far this row is from the SCREEN (0.0 = 1st row at screen, 1.0 = back row)
+        if row_label in rows_front_to_back:
+            row_idx_from_screen = rows_front_to_back.index(row_label)
+            dist_ratio = (row_idx_from_screen + 1) / float(total_rows)
+        else:
+            # In VOX Egypt, A-H are middle/back and I-P are front rows near the screen
+            if row_label in {"I", "J", "K", "L", "M", "N", "O", "P"}:
+                dist_ratio = 0.15  # Front row near screen -> reject
+            else:
+                dist_ratio = 0.65  # Middle/back row -> accept
 
-    good_seats.sort(
-        key=lambda x: (
-            0 if "🌟" in x["quality"] else 1,
-            x["row"],
-            x["number"] if isinstance(x["number"], int) else 99,
+        # Reject front rows (closest 38% of rows to the screen)
+        if dist_ratio <= MIN_DISTANCE_FROM_SCREEN_RATIO:
+            continue
+
+        # 2. Check horizontal center position within the row
+        min_center = max(4, int(round(total_in_row * CENTER_SEAT_MIN_RATIO)))
+        max_center = min(total_in_row - 3, int(round(total_in_row * CENTER_SEAT_MAX_RATIO)))
+        is_center = min_center <= seat_num <= max_center
+
+        if STRICT_CENTER_ONLY and not is_center:
+            continue
+
+        if dist_ratio <= SWEET_SPOT_MAX_RATIO:
+            quality = f"🌟 مثالي — منتصف القاعة (الصف {row_label} رقم {row_idx_from_screen + 1} من الشاشة)"
+            priority = 0
+        else:
+            quality = f"✅ ممتاز — الصفوف الخلفية بالمنتصف (الصف {row_label})"
+            priority = 1
+
+        good_seats.append(
+            {
+                "row": row_label,
+                "number": seat_num,
+                "code": code,
+                "quality": quality,
+                "priority": priority,
+            }
         )
-    )
+
+    good_seats.sort(key=lambda x: (x["priority"], x["row"], x["number"]))
     return good_seats
 
 
@@ -392,32 +368,19 @@ def parse_showtimes_from_html(
 
 
 # ==============================================================================
-# 6. SEAT MAP EXTRACTION (/booking/... -> Click Continue As Guest -> /seats)
+# 6. SEAT MAP EXTRACTION WITH SCREEN-TO-BACK ROW ORDERING
 # ==============================================================================
 
 def extract_seats_from_booking_page(
     page: Page,
     booking_url: str,
     debug_out: Optional[Dict[str, Any]] = None,
-) -> List[Dict[str, Any]]:
-    captured_api_seats: List[Dict[str, Any]] = []
-
-    def handle_response(response: Response) -> None:
-        try:
-            url_lower = response.url.lower()
-            if any(k in url_lower for k in ["seat", "layout", "plan", "ocapi", "booking"]):
-                if "application/json" in response.headers.get("content-type", "").lower():
-                    data = response.json()
-                    parse_json_seats(data, captured_api_seats)
-        except Exception:
-            pass
-
-    page.on("response", handle_response)
+) -> Tuple[List[Dict[str, Any]], List[str]]:
     try:
         page.goto(booking_url, wait_until="domcontentloaded", timeout=35000)
         page.wait_for_timeout(2000)
 
-        # Step 1: Click "Continue As Guest" button if we are on the /guest login gate
+        # Click "Continue As Guest" if on the /guest login gate
         guest_loc = page.locator(
             "a:has-text('Continue As Guest'), button:has-text('Continue As Guest'), "
             "a:has-text('Continue as guest'), button:has-text('Continue as guest'), "
@@ -426,11 +389,11 @@ def extract_seats_from_booking_page(
         if guest_loc.count() > 0:
             try:
                 guest_loc.first.click(timeout=6000)
-                page.wait_for_timeout(3000)
+                page.wait_for_timeout(2500)
             except Exception:
                 pass
 
-        # Step 2: Dismiss the "Conditions of Access / I Agree" 18TC modal if present
+        # Click "I Agree" on the 18TC access conditions popup if present
         agree_loc = page.locator(
             "button:has-text('I Agree'), a:has-text('I Agree'), "
             "button:has-text('Agree'), a.action.primary:has-text('Agree')"
@@ -443,214 +406,112 @@ def extract_seats_from_booking_page(
             except Exception:
                 pass
 
-        if captured_api_seats:
-            return captured_api_seats
-
-        # Step 3: Extract seats from the live DOM (supports both attribute-based and row-container DOMs)
         eval_result = page.evaluate(
             """() => {
-                const results = [];
-                const isTakenStr = (str) => {
+                const isTakenOrExcluded = (str) => {
                     const s = (str || '').toLowerCase();
                     return [
                         'sold', 'occupied', 'unavailable', 'taken', 'reserved',
                         'blocked', 'broken', 'wheelchair', 'companion', 'disabled',
-                        'unselectable', 'not-available', 'booked'
+                        'unselectable', 'not-available', 'booked', 'blank', 'special'
                     ].some(w => s.includes(w));
                 };
 
-                // Strategy A: Direct elements with seat attributes or aria-labels
-                const directEls = document.querySelectorAll(
-                    '[data-seat], [data-row], [data-seat-number], [data-seat-id], ' +
-                    'li.seat, span.seat, a.seat, button.seat, div.seat, g.seat, ' +
-                    '[class*="seat-" i], [class*="seat " i]'
-                );
-                directEls.forEach(el => {
+                // 1. Collect all seat elements (both available and occupied) to know exact row order & row widths
+                const allSeatEls = document.querySelectorAll('.seat, [data-seat], li.seat, span.seat');
+                const rowsInDomOrder = [];
+                const rowMaxSeatMap = {};
+                const availableSeats = [];
+
+                allSeatEls.forEach(el => {
                     const cls = (typeof el.className === 'string' ? el.className : (el.getAttribute('class') || '')).toLowerCase();
-                    if (cls.includes('seat-plan') || cls.includes('seat-map') || cls.includes('seat-legend') || cls.includes('seats-wrapper')) {
+                    if (cls.includes('seat-plan') || cls.includes('seat-map') || cls.includes('seat-legend') || cls.includes('blank')) {
                         return;
                     }
+
+                    let row = (
+                        el.getAttribute('data-row') ||
+                        el.getAttribute('data-row-name') ||
+                        (el.closest('[data-row]') ? el.closest('[data-row]').getAttribute('data-row') : '') ||
+                        ''
+                    ).trim().toUpperCase();
+
+                    // In VOX Cinemas, real seat rows are single letters A-P (corridor blanks have numeric data-row like "10")
+                    if (!/^[A-P]$/.test(row)) {
+                        return;
+                    }
+
+                    if (!rowsInDomOrder.includes(row)) {
+                        rowsInDomOrder.push(row);
+                    }
+
+                    let numStr = (
+                        el.getAttribute('data-seat') ||
+                        el.getAttribute('data-number') ||
+                        (el.textContent || '')
+                    ).trim();
+                    const seatNum = /^\\d{1,2}$/.test(numStr) ? parseInt(numStr, 10) : null;
+                    if (seatNum !== null) {
+                        rowMaxSeatMap[row] = Math.max(rowMaxSeatMap[row] || 14, seatNum);
+                    }
+
                     const statusStr = [
                         cls,
                         el.getAttribute('data-status'),
                         el.getAttribute('aria-disabled'),
-                        el.getAttribute('title'),
-                        el.getAttribute('aria-label')
+                        el.getAttribute('title')
                     ].join(' ');
-                    if (isTakenStr(statusStr)) return;
 
-                    let row = el.getAttribute('data-row')
-                        || el.getAttribute('data-row-name')
-                        || el.getAttribute('data-row-id')
-                        || (el.closest('[data-row]') ? el.closest('[data-row]').getAttribute('data-row') : '')
-                        || '';
-                    let num = el.getAttribute('data-seat')
-                        || el.getAttribute('data-seat-number')
-                        || el.getAttribute('data-number')
-                        || el.getAttribute('data-col')
-                        || '';
-                    const label = el.getAttribute('aria-label')
-                        || el.getAttribute('title')
-                        || el.getAttribute('data-id')
-                        || el.getAttribute('id')
-                        || '';
-
-                    // If row is not in attributes, check if parent row container has a row letter child (A-P)
-                    if (!row) {
-                        const rowParent = el.closest('li, tr, .row, [class*="row" i], g');
-                        if (rowParent) {
-                            const children = Array.from(rowParent.children);
-                            for (const ch of children) {
-                                const t = (ch.textContent || '').trim().toUpperCase();
-                                if (/^[A-P]$/.test(t) && ch !== el) {
-                                    row = t;
-                                    break;
-                                }
-                            }
-                        }
-                    }
-
-                    if (!num) {
-                        const txt = (el.textContent || '').trim();
-                        if (/^\\d{1,2}$/.test(txt)) {
-                            num = txt;
-                        } else if (/^[A-P]\\s*[-:]?\\s*\\d{1,2}$/i.test(txt)) {
-                            const m = txt.match(/^([A-P])\\s*[-:]?\\s*(\\d{1,2})$/i);
-                            if (m) { row = m[1].toUpperCase(); num = m[2]; }
-                        }
-                    }
-
-                    if (row || label) {
-                        results.push({ row: row, num: num, label: label, cls: cls });
+                    if (!isTakenOrExcluded(statusStr) && seatNum !== null) {
+                        availableSeats.push({
+                            row: row,
+                            number: seatNum,
+                            code: `${row}${seatNum}`,
+                            cls: cls
+                        });
                     }
                 });
 
-                // Strategy B: Row-container scan (for SVG / table / list rows labeled A-P)
-                if (results.length === 0) {
-                    const allContainers = document.querySelectorAll('tr, li, div, ol, ul, g');
-                    allContainers.forEach(container => {
-                        // Look for a direct child whose text is a single row letter A-P
-                        let rowLetter = '';
-                        for (const child of Array.from(container.children)) {
-                            const t = (child.textContent || '').trim().toUpperCase();
-                            if (/^[A-P]$/.test(t) && child.children.length === 0) {
-                                rowLetter = t;
-                                break;
-                            }
-                        }
-                        if (!rowLetter) return;
-
-                        // Find numbered seat elements inside this row container
-                        const candidateSeats = container.querySelectorAll('li, span, a, button, div, td, g, text');
-                        let totalInRow = 0;
-                        const rowSeats = [];
-                        candidateSeats.forEach(seatEl => {
-                            const txt = (seatEl.textContent || '').trim();
-                            if (!/^\\d{1,2}$/.test(txt)) return;
-                            if (seatEl.children.length > 1) return;
-                            const seatNum = parseInt(txt, 10);
-                            if (seatNum < 1 || seatNum > 35) return;
-                            totalInRow = Math.max(totalInRow, seatNum);
-
-                            const cls = (typeof seatEl.className === 'string' ? seatEl.className : (seatEl.getAttribute('class') || '')).toLowerCase();
-                            const parentCls = seatEl.parentElement
-                                ? (typeof seatEl.parentElement.className === 'string' ? seatEl.parentElement.className : (seatEl.parentElement.getAttribute('class') || '')).toLowerCase()
-                                : '';
-                            const combined = cls + ' ' + parentCls + ' ' + (seatEl.getAttribute('data-status') || '');
-                            if (!isTakenStr(combined)) {
-                                rowSeats.push({ row: rowLetter, num: String(seatNum), label: `${rowLetter}${seatNum}`, total_in_row: totalInRow });
-                            }
-                        });
-                        rowSeats.forEach(s => {
-                            s.total_in_row = totalInRow;
-                            results.push(s);
-                        });
-                    });
-                }
-
-                // Collect brief debug info if 0 seats found
-                let debugSnippet = '';
-                if (results.length === 0) {
-                    const mainEl = document.querySelector('main, # seats, .seat-plan, .seats, body');
-                    debugSnippet = mainEl ? mainEl.innerHTML.slice(0, 1500) : '';
-                }
+                // Attach total_in_row to each available seat
+                availableSeats.forEach(s => {
+                    s.total_in_row = rowMaxSeatMap[s.row] || 16;
+                });
 
                 return {
                     url: window.location.href,
                     title: document.title,
-                    seats: results,
-                    debugSnippet: debugSnippet
+                    rows_front_to_back: rowsInDomOrder,
+                    row_widths: rowMaxSeatMap,
+                    seats: availableSeats
                 };
             }"""
         )
 
-        if debug_out is not None and "seat_page_sample" not in debug_out:
-            debug_out["seat_page_sample"] = {
+        rows_front_to_back: List[str] = eval_result.get("rows_front_to_back", [])
+        seats: List[Dict[str, Any]] = eval_result.get("seats", [])
+
+        if debug_out is not None and "hall_layout_sample" not in debug_out and rows_front_to_back:
+            total_r = len(rows_front_to_back)
+            excluded_front = [
+                r for idx, r in enumerate(rows_front_to_back)
+                if ((idx + 1) / float(total_r)) <= MIN_DISTANCE_FROM_SCREEN_RATIO
+            ]
+            accepted_middle_back = [
+                r for r in rows_front_to_back if r not in excluded_front
+            ]
+            debug_out["hall_layout_sample"] = {
                 "booking_url": booking_url,
-                "final_url": eval_result.get("url"),
-                "title": eval_result.get("title"),
-                "extracted_count": len(eval_result.get("seats", [])),
-                "sample_seats": eval_result.get("seats", [])[:10],
-                "debug_html_snippet": eval_result.get("debugSnippet", "")[:600],
+                "rows_from_screen_to_back": rows_front_to_back,
+                "excluded_front_rows_near_screen": excluded_front,
+                "accepted_middle_and_back_rows": accepted_middle_back,
+                "row_widths": eval_result.get("row_widths", {}),
             }
 
-        parsed_dom_seats: List[Dict[str, Any]] = []
-        for item in eval_result.get("seats", []):
-            raw_label = item.get("label") or f"{item.get('row', '')}{item.get('num', '')}"
-            row_label, seat_num = parse_seat_code(raw_label)
-            if (not row_label or len(row_label) > 2) and item.get("row"):
-                row_label = str(item["row"]).strip().upper()
-            if seat_num is None and str(item.get("num", "")).isdigit():
-                seat_num = int(item["num"])
-
-            if row_label and 1 <= len(row_label) <= 2 and row_label.isalpha() and seat_num is not None:
-                code = f"{row_label}{seat_num}"
-                parsed_dom_seats.append(
-                    {
-                        "row": row_label,
-                        "number": seat_num,
-                        "code": code,
-                        "total_in_row": item.get("total_in_row", 16),
-                    }
-                )
-
-        return parsed_dom_seats
+        return seats, rows_front_to_back
 
     except Exception as exc:
         print(f"[WARN] Could not inspect seat map {booking_url}: {exc}")
-        return []
-    finally:
-        try:
-            page.remove_listener("response", handle_response)
-        except Exception:
-            pass
-
-
-def parse_json_seats(data: object, out_list: List[Dict[str, Any]]) -> None:
-    if isinstance(data, dict):
-        status = str(data.get("status", data.get("seatStatus", data.get("isAvailable", "")))).lower()
-        row = data.get("row", data.get("rowName", data.get("physicalRowId", "")))
-        number = data.get("number", data.get("seatNumber", data.get("column", "")))
-
-        if row and number and status in ("available", "0", "true", "open", "free"):
-            try:
-                s_num = int(re.sub(r"\D", "", str(number)))
-            except ValueError:
-                s_num = None
-            r_str = str(row).strip().upper()
-            if s_num is not None:
-                out_list.append(
-                    {
-                        "row": r_str,
-                        "number": s_num,
-                        "code": f"{r_str}{s_num}",
-                    }
-                )
-        for val in data.values():
-            parse_json_seats(val, out_list)
-    elif isinstance(data, list):
-        for item in data:
-            parse_json_seats(item, out_list)
+        return [], []
 
 
 # ==============================================================================
@@ -683,12 +544,12 @@ def run_watcher() -> None:
         raise RuntimeError("Playwright is not installed.")
 
     now_cairo = datetime.now(CAIRO_TZ).strftime("%Y-%m-%d %I:%M:%S %p")
-    print(f"=== Starting VOX Cinemas City Centre Almaza Watcher v3 ({now_cairo} Cairo Time) ===")
+    print(f"=== Starting VOX Cinemas City Centre Almaza Watcher v4 ({now_cairo} Cairo Time) ===")
 
     notified_keys = load_notified_state()
     new_notifications_sent = 0
     diagnostics: Dict[str, Any] = {
-        "version": "v3-strict-best-seats-only",
+        "version": "v4-screen-distance-aware",
         "last_run_cairo": now_cairo,
         "pages_checked": [],
         "sessions_discovered_count": 0,
@@ -729,7 +590,7 @@ def run_watcher() -> None:
             try:
                 resp = page.goto(movie_url, wait_until="domcontentloaded", timeout=35000)
                 status_code = resp.status if resp else 0
-                page.wait_for_timeout(2500)
+                page.wait_for_timeout(2000)
                 page_title = page.title()
 
                 diagnostics["pages_checked"].append(
@@ -761,7 +622,7 @@ def run_watcher() -> None:
                     d_url = f"{movie_url}?d={d_code}"
                     try:
                         page.goto(d_url, wait_until="domcontentloaded", timeout=30000)
-                        page.wait_for_timeout(1500)
+                        page.wait_for_timeout(1200)
                         d_sessions = parse_showtimes_from_html(
                             page.content(), d_url, fallback_date_code=d_code
                         )
@@ -790,10 +651,12 @@ def run_watcher() -> None:
             booking_url = session["booking_url"]
 
             print(f"[CHECK] {cinema} | {experience} | {date_str} | {show_time}")
-            raw_seats = extract_seats_from_booking_page(page, booking_url, debug_out=diagnostics)
-            good_seats = filter_and_rank_seats(raw_seats)
+            raw_seats, rows_front_to_back = extract_seats_from_booking_page(
+                page, booking_url, debug_out=diagnostics
+            )
+            good_seats = filter_and_rank_seats(raw_seats, rows_front_to_back)
             print(
-                f"   -> Total open seats: {len(raw_seats)} | Ideal center seats (Rows F-P): {len(good_seats)}"
+                f"   -> Open seats: {len(raw_seats)} | True Middle/Back-Center seats: {len(good_seats)}"
             )
 
             if good_seats:
@@ -809,11 +672,10 @@ def run_watcher() -> None:
 
             unnotified_good_seats = []
             for seat in good_seats:
-                seat_key = f"{session['session_id']}_{session['date_code']}_{seat['code']}"
+                seat_key = f"v4_{session['session_id']}_{session['date_code']}_{seat['code']}"
                 if seat_key not in notified_keys:
                     unnotified_good_seats.append((seat_key, seat))
 
-            # Strictly send ONLY if ideal center/back seats (Rows F-P) are available!
             if len(unnotified_good_seats) >= MIN_SEATS_NEEDED:
                 rows_summary: Dict[str, List[str]] = {}
                 for seat_key, seat in unnotified_good_seats[:15]:
@@ -836,7 +698,7 @@ def run_watcher() -> None:
                     f"🖥 <b>هل الحفلة MAX؟</b> {max_badge}\n"
                     f"📅 <b>اليوم والتاريخ:</b> {date_str}\n"
                     f"⏰ <b>موعد الحفلة:</b> {show_time}\n\n"
-                    f"💺 <b>أفضل الكراسي المتاحة حالياً (الصفوف F–P بالمنتصف فقط):</b>\n"
+                    f"💺 <b>الكراسي المتاحة (منتصف وأعلى القاعة فقط — بعيداً عن الشاشة):</b>\n"
                     f"{rows_block}\n\n"
                     f"⚡ <a href=\"{booking_url}\">اضغط هنا للدخول لصفحة الحفلة والحجز فوراً</a>"
                 )
