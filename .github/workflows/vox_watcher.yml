@@ -1,10 +1,8 @@
 name: VOX Cinemas Seat Watcher (Avengers Doomsday)
 
 on:
-  # يعمل تلقائياً كل 10 دقائق على مدار الساعة
   schedule:
     - cron: '*/10 * * * *'
-  # يتيح لك تشغيله يدوياً بضغطة زر من تبويب Actions للتجربة الفورية
   workflow_dispatch:
     inputs:
       send_test_message:
@@ -22,7 +20,7 @@ permissions:
 jobs:
   check-seats:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 6
 
     steps:
       - name: 1. تحميل ملفات المستودع (Checkout)
@@ -47,7 +45,7 @@ jobs:
           restore-keys: |
             vox-seats-state-
 
-      - name: 5. تشغيل فاحص الكراسي وإرسال إشعارات تيليجرام
+      - name: 5. تشغيل فاحص الكراسي (مع شاشة افتراضية Xvfb لتخطي Cloudflare)
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
@@ -56,14 +54,13 @@ jobs:
           if [ "${{ github.event.inputs.send_test_message }}" = "true" ]; then
             python vox_watcher.py --test
           fi
-          python vox_watcher.py
+          xvfb-run --auto-servernum --server-args="-screen 0 1366x900x24" python vox_watcher.py
 
-      - name: 6. حفظ تحديثات سجل الكراسي لمنع تكرار الإشعارات
+      - name: 6. حفظ تحديثات سجل الكراسي وتقرير الفحص في المستودع
         run: |
-          if [ -f notified_seats.json ]; then
-            git config user.name "github-actions[bot]"
-            git config user.email "github-actions[bot]@users.noreply.github.com"
-            git add notified_seats.json
-            git diff --staged --quiet || git commit -m "chore: update notified seats state [skip ci]"
-            git push || true
-          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git pull --rebase origin main || true
+          git add notified_seats.json last_run_status.json || true
+          git diff --staged --quiet || git commit -m "chore: update notified seats state [skip ci]"
+          git push || true
