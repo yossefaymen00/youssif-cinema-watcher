@@ -1,0 +1,259 @@
+{
+  "last_run_cairo": "2026-11-14 03:07:26 PM",
+  "pages_checked": [
+    {
+      "url": "https://egy.voxcinemas.com/movies/avengers-doomsday",
+      "status": 200,
+      "title": "Avengers: Doomsday | Now Showing | Book Tickets | VOX Cinemas Egypt"
+    },
+    {
+      "url": "https://egy.voxcinemas.com/movies/avengers-doomsday-infinity-vision",
+      "status": 200,
+      "title": "Avengers: Doomsday (Infinity Vision) | Now Showing | Book Tickets | VOX Cinemas Egypt"
+    }
+  ],
+  "sessions_discovered_count": 30,
+  "sessions_discovered": [
+    {
+      "cinema": "City Centre Almaza",
+      "experience": "Standard",
+      "date": "20261219",
+      "date_code": "20261219",
+      "time": "3:30pm",
+      "booking_url": "https://egy.voxcinemas.com/booking/0047-276993"
+    },
+    {
+      "cinema": "City Centre Almaza",
+      "experience": "Standard",
+      "date": "20261219",
+      "date_code": "20261219",
+      "time": "11:00pm",
+      "booking_url": "https://egy.voxcinemas.com/booking/0047-276995"
+    },
+    {
+      "cinema": "City Centre Almaza",
+      "experience": "Standard",
+      "date": "20261220",
+      "date_code": "20261220",
+      "time": "11:45am",
+      "booking_url": "https://egy.voxcinemas.com/booking/0047-276996"
+    },
+    {
+      "cinema": "City Centre Almaza",
+      "experience": "Standard",
+      "date": "20261220",
+      "date_code": "20261220",
+      "time": "3:30pm",
+      "booking_url": "https://egy.voxcinemas.com/booking/0047-276997"
+    },
+    {
+      "cinema": "City Centre Almaza",
+      "experience": "Standard",
+      "date": "20261220",
+      "date_code": "20261220",
+      "time": "7:15pm",
+      "booking_url": "https://egy.voxcinemas.com/booking/0047-276998"
+    },
+    {
+      "cinema": "City Centre Almaza",
+      "experience": "Standard",
+      "date": "20261220",
+      "date_code": "20261220",
+      "time": "11:00pm",
+      "booking_url": "https://egy.voxcinemas.com/booking/0047-276999"
+    },
+    {
+      "cinema": "City Centre Almaza",
+      "experience": "Standard",
+      "date": "20261221",
+      "date_code": "20261221",
+      "time": "11:45am",
+      "booking_url": "https://egy.voxcinemas.com/booking/0047-277000"
+    },
+    {
+      "cinema": "City Centre Almaza",
+      "experience": "Standard",
+      "date": "20261221",
+      "date_code": "20261221",
+      "time": "3:30pm",
+      "booking_url": "https://egy.voxcinemas.com/booking/0047-277001"
+    },
+    {
+      "cinema": "City Centre Almaza",
+      "experience": "Standard",
+      "date": "20261221",
+      "date_code": "20261221",
+      "time": "7:15pm",
+      "booking_url": "https://egy.voxcinemas.com/booking/0047-277002"
+    },
+    {
+      "cinema": "City Centre Almaza",
+      "experience": "Standard",
+      "date": "20261221",
+      "date_code": "20261221",
+      "time": "11:00pm",
+      "booking_url": "https://egy.voxcinemas.com/booking/0047-277003"
+    },
+    {
+      "cinema": "City Centre Almaza",
+      "experience": "Standard",
+      "date": "20261222",
+      "date_code": "20261222",
+      "time": "11:45am",
+      "booking_url": "https://egy.voxcinemas.com/booking/0047-277004"
+    },
+    {
+      "cinema": "City Centre Almaza",
+      "experience": "Standard",
+      "date": "20261222",
+      "date_code": "20261222",
+      "time": "3:30pm",
+      "booking_url": "https://egy.voxcinemas.com/booking/0047-277005"
+    },
+    {
+      "cinema": "City Centre Almaza",
+      "experience": "Standard",
+      "date": "20261222",
+      "date_code": "20261222",
+      "time": "7:15pm",
+      "booking_url": "https://egy.voxcinemas.com/booking/0047-277006"
+    },
+    {
+      "cinema": "City Centre Almaza",
+      "experience": "Standard",
+      "date": "20261222",
+      "date_code": "20261222",
+      "time": "11:00pm",
+      "booking_url": "https://egy.voxcinemas.com/booking/0047-277007"
+    },
+    {
+      "cinema": "City Centre Almaza",
+      "experience": "Standard",
+      "date": "20261223",
+      "date_code": "20261223",
+      "time": "11:45am",
+      "booking_url": "https://egy.voxcinemas.com/booking/0047-277008"
+    },
+    {
+      "cinema": "City Centre Almaza",
+      "experience": "Standard",
+      "date": "20261223",
+      "date_code": "20261223",
+      "time": "3:30pm",
+      "booking_url": "https://egy.voxcinemas.com/booking/0047-277009"
+    },
+    {
+      "cinema": "City Centre Almaza",
+      "experience": "Standard",
+      "date": "20261223",
+      "date_code": "20261223",
+      "time": "7:15pm",
+      "booking_url": "https://egy.voxcinemas.com/booking/0047-277010"
+    },
+    {
+      "cinema": "City Centre Almaza",
+      "experience": "Standard",
+      "date": "20261223",
+      "date_code": "20261223",
+      "time": "11:00pm",
+      "booking_url": "https://egy.voxcinemas.com/booking/0047-277011"
+    },
+    {
+      "cinema": "City Centre Almaza",
+      "experience": "Standard",
+      "date": "20261220",
+      "date_code": "20261220",
+      "time": "11:15am",
+      "booking_url": "https://egy.voxcinemas.com/booking/0047-276782"
+    },
+    {
+      "cinema": "City Centre Almaza",
+      "experience": "MAX",
+      "date": "20261221",
+      "date_code": "20261221",
+      "time": "10:45am",
+      "booking_url": "https://egy.voxcinemas.com/booking/0047-276958"
+    },
+    {
+      "cinema": "City Centre Almaza",
+      "experience": "Standard",
+      "date": "20261221",
+      "date_code": "20261221",
+      "time": "11:15am",
+      "booking_url": "https://egy.voxcinemas.com/booking/0047-276786"
+    },
+    {
+      "cinema": "City Centre Almaza",
+      "experience": "Standard",
+      "date": "20261221",
+      "date_code": "20261221",
+      "time": "3:00pm",
+      "booking_url": "https://egy.voxcinemas.com/booking/0047-276787"
+    },
+    {
+      "cinema": "City Centre Almaza",
+      "experience": "MAX",
+      "date": "20261222",
+      "date_code": "20261222",
+      "time": "2:30pm",
+      "booking_url": "https://egy.voxcinemas.com/booking/0047-276969"
+    },
+    {
+      "cinema": "City Centre Almaza",
+      "experience": "Standard",
+      "date": "20261222",
+      "date_code": "20261222",
+      "time": "11:15am",
+      "booking_url": "https://egy.voxcinemas.com/booking/0047-276790"
+    },
+    {
+      "cinema": "City Centre Almaza",
+      "experience": "Standard",
+      "date": "20261222",
+      "date_code": "20261222",
+      "time": "3:00pm",
+      "booking_url": "https://egy.voxcinemas.com/booking/0047-276791"
+    },
+    {
+      "cinema": "City Centre Almaza",
+      "experience": "Standard",
+      "date": "20261222",
+      "date_code": "20261222",
+      "time": "6:45pm",
+      "booking_url": "https://egy.voxcinemas.com/booking/0047-276792"
+    },
+    {
+      "cinema": "City Centre Almaza",
+      "experience": "MAX",
+      "date": "20261223",
+      "date_code": "20261223",
+      "time": "10:45am",
+      "booking_url": "https://egy.voxcinemas.com/booking/0047-276988"
+    },
+    {
+      "cinema": "City Centre Almaza",
+      "experience": "Standard",
+      "date": "20261223",
+      "date_code": "20261223",
+      "time": "11:15am",
+      "booking_url": "https://egy.voxcinemas.com/booking/0047-276794"
+    },
+    {
+      "cinema": "City Centre Almaza",
+      "experience": "Standard",
+      "date": "20261223",
+      "date_code": "20261223",
+      "time": "3:00pm",
+      "booking_url": "https://egy.voxcinemas.com/booking/0047-276795"
+    },
+    {
+      "cinema": "City Centre Almaza",
+      "experience": "Standard",
+      "date": "20261223",
+      "date_code": "20261223",
+      "time": "10:30pm",
+      "booking_url": "https://egy.voxcinemas.com/booking/0047-276797"
+    }
+  ],
+  "new_notifications_sent": 30
+}

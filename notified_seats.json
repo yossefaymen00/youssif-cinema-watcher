@@ -1,4 +1,35 @@
 {
-  "updated_at": "2026-11-14T14:38:55.164037+02:00",
-  "notified_keys": []
+  "updated_at": "2026-11-14T15:12:15.130432+02:00",
+  "notified_keys": [
+    "SESSION_OPEN_City Centre Almaza_MAX_20261221_10:45am",
+    "SESSION_OPEN_City Centre Almaza_MAX_20261222_2:30pm",
+    "SESSION_OPEN_City Centre Almaza_MAX_20261223_10:45am",
+    "SESSION_OPEN_City Centre Almaza_Standard_20261219_11:00pm",
+    "SESSION_OPEN_City Centre Almaza_Standard_20261219_3:30pm",
+    "SESSION_OPEN_City Centre Almaza_Standard_20261220_11:00pm",
+    "SESSION_OPEN_City Centre Almaza_Standard_20261220_11:15am",
+    "SESSION_OPEN_City Centre Almaza_Standard_20261220_11:45am",
+    "SESSION_OPEN_City Centre Almaza_Standard_20261220_3:30pm",
+    "SESSION_OPEN_City Centre Almaza_Standard_20261220_7:15pm",
+    "SESSION_OPEN_City Centre Almaza_Standard_20261221_11:00pm",
+    "SESSION_OPEN_City Centre Almaza_Standard_20261221_11:15am",
+    "SESSION_OPEN_City Centre Almaza_Standard_20261221_11:45am",
+    "SESSION_OPEN_City Centre Almaza_Standard_20261221_3:00pm",
+    "SESSION_OPEN_City Centre Almaza_Standard_20261221_3:30pm",
+    "SESSION_OPEN_City Centre Almaza_Standard_20261221_7:15pm",
+    "SESSION_OPEN_City Centre Almaza_Standard_20261222_11:00pm",
+    "SESSION_OPEN_City Centre Almaza_Standard_20261222_11:15am",
+    "SESSION_OPEN_City Centre Almaza_Standard_20261222_11:45am",
+    "SESSION_OPEN_City Centre Almaza_Standard_20261222_3:00pm",
+    "SESSION_OPEN_City Centre Almaza_Standard_20261222_3:30pm",
+    "SESSION_OPEN_City Centre Almaza_Standard_20261222_6:45pm",
+    "SESSION_OPEN_City Centre Almaza_Standard_20261222_7:15pm",
+    "SESSION_OPEN_City Centre Almaza_Standard_20261223_10:30pm",
+    "SESSION_OPEN_City Centre Almaza_Standard_20261223_11:00pm",
+    "SESSION_OPEN_City Centre Almaza_Standard_20261223_11:15am",
+    "SESSION_OPEN_City Centre Almaza_Standard_20261223_11:45am",
+    "SESSION_OPEN_City Centre Almaza_Standard_20261223_3:00pm",
+    "SESSION_OPEN_City Centre Almaza_Standard_20261223_3:30pm",
+    "SESSION_OPEN_City Centre Almaza_Standard_20261223_7:15pm"
+  ]
 }
