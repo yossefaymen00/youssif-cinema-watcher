@@ -1,6 +1,7 @@
 name: VOX Cinemas Seat Watcher (Avengers Doomsday)
 
 on:
+  # Runs automatically every 10 minutes
   schedule:
     - cron: '*/10 * * * *'
   workflow_dispatch:
@@ -20,7 +21,7 @@ permissions:
 jobs:
   check-seats:
     runs-on: ubuntu-latest
-    timeout-minutes: 6
+    timeout-minutes: 8
 
     steps:
       - name: 1. تحميل ملفات المستودع (Checkout)
@@ -62,5 +63,7 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git pull --rebase origin main || true
           git add notified_seats.json last_run_status.json || true
-          git diff --staged --quiet || git commit -m "chore: update notified seats state [skip ci]"
+          # IMPORTANT: Do NOT include [skip ci] in the commit message!
+          # Including [skip ci] on HEAD of main causes GitHub Actions to skip future scheduled cron runs!
+          git diff --staged --quiet || git commit -m "chore: update notified seats state"
           git push || true
