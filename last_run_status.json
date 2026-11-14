@@ -1,6 +1,6 @@
 {
   "version": "v3-strict-best-seats-only",
-  "last_run_cairo": "2026-11-14 03:25:18 PM",
+  "last_run_cairo": "2026-11-14 07:03:01 PM",
   "pages_checked": [
     {
       "url": "https://egy.voxcinemas.com/movies/avengers-doomsday",
@@ -17,16 +17,6 @@
   "sessions_with_ideal_seats": [
     {
       "experience": "Standard",
-      "date": "20261219",
-      "time": "11:00pm",
-      "ideal_seats_count": 2,
-      "top_ideal_seats": [
-        "J9",
-        "L4"
-      ]
-    },
-    {
-      "experience": "Standard",
       "date": "20261220",
       "time": "11:45am",
       "ideal_seats_count": 5,
@@ -40,138 +30,75 @@
     },
     {
       "experience": "Standard",
-      "date": "20261222",
+      "date": "20261220",
       "time": "3:30pm",
-      "ideal_seats_count": 5,
-      "top_ideal_seats": [
-        "K7",
-        "K8",
-        "K9",
-        "K10",
-        "L4"
-      ]
-    },
-    {
-      "experience": "Standard",
-      "date": "20261223",
-      "time": "11:45am",
-      "ideal_seats_count": 6,
+      "ideal_seats_count": 2,
       "top_ideal_seats": [
         "K4",
-        "K7",
-        "K8",
-        "K9",
-        "K10",
         "L4"
       ]
     },
     {
       "experience": "Standard",
-      "date": "20261223",
-      "time": "3:30pm",
-      "ideal_seats_count": 3,
-      "top_ideal_seats": [
-        "K9",
-        "K10",
-        "L4"
-      ]
-    },
-    {
-      "experience": "Standard",
-      "date": "20261223",
-      "time": "7:15pm",
-      "ideal_seats_count": 1,
-      "top_ideal_seats": [
-        "L4"
-      ]
-    },
-    {
-      "experience": "Standard",
-      "date": "20261223",
-      "time": "11:00pm",
-      "ideal_seats_count": 5,
+      "date": "20261222",
+      "time": "11:45am",
+      "ideal_seats_count": 11,
       "top_ideal_seats": [
         "J8",
+        "J9",
+        "J10",
+        "K4",
+        "K5",
+        "K6",
         "K7",
         "K8",
+        "K9",
+        "K10"
+      ]
+    },
+    {
+      "experience": "Standard",
+      "date": "20261222",
+      "time": "3:30pm",
+      "ideal_seats_count": 5,
+      "top_ideal_seats": [
+        "K7",
+        "K8",
+        "K9",
         "K10",
         "L4"
       ]
     },
     {
       "experience": "Standard",
-      "date": "20261221",
-      "time": "11:15am",
-      "ideal_seats_count": 7,
+      "date": "20261222",
+      "time": "7:15pm",
+      "ideal_seats_count": 4,
       "top_ideal_seats": [
-        "M4",
-        "N5",
-        "N8",
-        "N9",
-        "N10",
-        "N11",
-        "N12"
+        "H8",
+        "J10",
+        "K10",
+        "L4"
       ]
     },
     {
       "experience": "Standard",
-      "date": "20261221",
+      "date": "20261222",
       "time": "3:00pm",
-      "ideal_seats_count": 2,
+      "ideal_seats_count": 3,
       "top_ideal_seats": [
         "N5",
-        "N7"
-      ]
-    },
-    {
-      "experience": "MAX",
-      "date": "20261222",
-      "time": "2:30pm",
-      "ideal_seats_count": 2,
-      "top_ideal_seats": [
-        "J5",
-        "J6"
-      ]
-    },
-    {
-      "experience": "Standard",
-      "date": "20261222",
-      "time": "11:15am",
-      "ideal_seats_count": 1,
-      "top_ideal_seats": [
-        "N10"
-      ]
-    },
-    {
-      "experience": "MAX",
-      "date": "20261223",
-      "time": "10:45am",
-      "ideal_seats_count": 2,
-      "top_ideal_seats": [
-        "J5",
-        "J6"
-      ]
-    },
-    {
-      "experience": "Standard",
-      "date": "20261223",
-      "time": "10:30pm",
-      "ideal_seats_count": 5,
-      "top_ideal_seats": [
-        "N5",
-        "N9",
-        "N10",
-        "N11",
+        "N6",
         "N12"
       ]
     }
   ],
-  "new_notifications_sent": 13,
+  "new_notifications_sent": 4,
   "seat_page_sample": {
-    "booking_url": "https://egy.voxcinemas.com/booking/0047-276993",
-    "final_url": "https://egy.voxcinemas.com/booking/ee9ce734-313a-4592-b7f5-63422f880394_0047-276993/seats#guest",
+    "booking_url": "https://egy.voxcinemas.com/booking/0047-276996",
+    "final_url": "https://egy.voxcinemas.com/booking/22d7e85f-1cd0-456e-a49d-5356ca80ceed_0047-276996/seats#guest",
     "title": "Book Tickets | VOX Cinemas Egypt",
-    "extracted_count": 22,
+    "extracted_count": 29,
     "sample_seats": [
       {
         "row": "10",
@@ -199,6 +126,24 @@
       },
       {
         "row": "L",
+        "num": "4",
+        "label": "",
+        "cls": "seat normal standard sub-category-standard"
+      },
+      {
+        "row": "L",
+        "num": "3",
+        "label": "",
+        "cls": "seat special standard sub-category-standard"
+      },
+      {
+        "row": "L",
+        "num": "2",
+        "label": "",
+        "cls": "seat special standard sub-category-standard"
+      },
+      {
+        "row": "L",
         "num": "1",
         "label": "",
         "cls": "seat normal standard sub-category-standard"
@@ -211,24 +156,6 @@
       },
       {
         "row": "10",
-        "num": "",
-        "label": "",
-        "cls": "seat blank"
-      },
-      {
-        "row": "10",
-        "num": "",
-        "label": "",
-        "cls": "seat blank"
-      },
-      {
-        "row": "9",
-        "num": "",
-        "label": "",
-        "cls": "seat blank"
-      },
-      {
-        "row": "8",
         "num": "",
         "label": "",
         "cls": "seat blank"
