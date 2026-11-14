@@ -1,0 +1,69 @@
+name: VOX Cinemas Seat Watcher (Avengers Doomsday)
+
+on:
+  # يعمل تلقائياً كل 10 دقائق على مدار الساعة
+  schedule:
+    - cron: '*/10 * * * *'
+  # يتيح لك تشغيله يدوياً بضغطة زر من تبويب Actions للتجربة الفورية
+  workflow_dispatch:
+    inputs:
+      send_test_message:
+        description: 'إرسال رسالة تجريبية على تيليجرام للتأكد من الإعدادات؟'
+        required: false
+        default: 'false'
+        type: choice
+        options:
+          - 'false'
+          - 'true'
+
+permissions:
+  contents: write
+
+jobs:
+  check-seats:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: 1. تحميل ملفات المستودع (Checkout)
+        uses: actions/checkout@v4
+
+      - name: 2. إعداد بيئة Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: 3. تثبيت المكتبات ومتصفح Playwright Chromium
+        run: |
+          pip install -r requirements.txt
+          playwright install --with-deps chromium
+
+      - name: 4. استرجاع سجل الكراسي المبلّغ عنها سابقاً (Cache)
+        uses: actions/cache@v4
+        with:
+          path: notified_seats.json
+          key: vox-seats-state-${{ github.run_id }}
+          restore-keys: |
+            vox-seats-state-
+
+      - name: 5. تشغيل فاحص الكراسي وإرسال إشعارات تيليجرام
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          MIN_SEATS_NEEDED: '1'
+        run: |
+          if [ "${{ github.event.inputs.send_test_message }}" = "true" ]; then
+            python vox_watcher.py --test
+          fi
+          python vox_watcher.py
+
+      - name: 6. حفظ تحديثات سجل الكراسي لمنع تكرار الإشعارات
+        run: |
+          if [ -f notified_seats.json ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add notified_seats.json
+            git diff --staged --quiet || git commit -m "chore: update notified seats state [skip ci]"
+            git push || true
+          fi
