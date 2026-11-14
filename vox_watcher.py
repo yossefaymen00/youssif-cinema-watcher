@@ -1,10 +1,14 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-VOX Cinemas Egypt — Early Booking & Seat Availability Watcher
+VOX Cinemas Egypt — Early Booking & Seat Availability Watcher (v2)
 Target Movie: Avengers: Doomsday (Standard & MAX / Infinity Vision)
 Target Cinema: City Centre Almaza Only
-Runs automatically on GitHub Actions or locally via Playwright + Telegram Bot API.
+Includes:
+- Proper relative URL resolution (?d=YYYYMMDD) across all early-booking dates
+- Guest checkout step navigation (/booking/... -> Continue As Guest -> /seats#guest)
+- Anti-bot headed browser support (via Xvfb on GitHub Actions)
+- Diagnostic status output (last_run_status.json) for easy verification
 """
 
 import json
@@ -12,99 +16,93 @@ import os
 import re
 import sys
 from datetime import datetime, timezone, timedelta
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
+from urllib.parse import urljoin
 import requests
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, Tag
 
 try:
     from playwright.sync_api import sync_playwright, Page, Response
 except ImportError:
     sync_playwright = None
-    Page = object
-    Response = object
+    Page = Any
+    Response = Any
 
 # ==============================================================================
-# 1. إعدادات المستخدم الأساسية (يمكن تعديلها مباشرة أو عبر متغيرات البيئة)
+# 1. USER CONFIGURATION
 # ==============================================================================
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "PUT_YOUR_BOT_TOKEN_HERE")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "PUT_YOUR_CHAT_ID_HERE")
 
-# روابط صفحات الفيلم على موقع VOX Cinemas Egypt (يشمل النسخة العادية ونسخة Infinity Vision)
+# Movie URLs on VOX Cinemas Egypt
 MOVIE_URLS = [
     "https://egy.voxcinemas.com/movies/avengers-doomsday",
     "https://egy.voxcinemas.com/movies/avengers-doomsday-infinity-vision",
 ]
 
-# الكلمات المفتاحية للبحث التلقائي في صفحة الأفلام في حال تغيير الرابط
-MOVIE_KEYWORDS = ["avengers", "doomsday"]
-
-# الفرع المطلوب: سيتي سنتر ألماظة فقط
+# Strictly monitor City Centre Almaza only
 TARGET_CINEMAS = [
     "City Centre Almaza",
 ]
 
-# أنواع القاعات المطلوبة (يدعم MAX و Standard و IMAX)
+# Allowed experiences (excludes GOLD, KIDS, 4DX)
 TARGET_EXPERIENCES = [
     "MAX",
     "STANDARD",
     "IMAX",
 ]
 
-# التواريخ المطلوبة بصيغة YYYYMMDD (اترك القائمة فارغة [] لمراقبة جميع الأيام المتاحة للحجز المبكر)
-# مثال لتحديد أيام بعينها: ["20261216", "20261217", "20261218"]
-TARGET_DATES: List[str] = []
+# Early-booking dates to scan automatically (plus any ?d= links discovered on the page)
+DEFAULT_EARLY_BOOKING_DATES = [
+    "20261216",
+    "20261217",
+    "20261218",
+    "20261219",
+    "20261220",
+    "20261221",
+    "20261222",
+    "20261223",
+]
 
-# فلتر الأوقات (اتركه فارغاً [] لمراقبة جميع الحفلات في أي وقت)
-# مثال: ["7:15pm", "10:30pm", "11:00pm"]
+# Optional filters (leave empty [] to monitor all dates and times)
+TARGET_DATES: List[str] = []
 TARGET_TIMES: List[str] = []
 
 # ==============================================================================
-# 2. إعدادات اختيار الكراسي المثالية (تجنب الصفوف الأمامية والأطراف)
+# 2. IDEAL SEAT SELECTION RULES (MIDDLE & BACK ROWS ONLY)
 # ==============================================================================
 
-# الصفوف الأمامية القريبة جداً من الشاشة (يتم استبعادها تماماً)
 EXCLUDED_FRONT_ROWS = {"A", "B", "C", "D"}
-
-# الصفوف المفضلة (من منتصف القاعة إلى آخرها: E إلى P)
 PREFERRED_ROWS = {"E", "F", "G", "H", "I", "J", "K", "L", "M", "N", "O", "P"}
-
-# صفوف الـ Sweet Spot (أفضل زاوية رؤية وصوت في منتصف القاعة والثلث الخلفي)
 SWEET_SPOT_ROWS = {"F", "G", "H", "I", "J", "K", "L"}
 
-# نسبة الكراسي الوسطى داخل الصف الواحد (لتجنب الكراسي المتطرفة على أقصى اليمين أو اليسار)
-# 0.20 إلى 0.80 تعني استبعاد أول 20% وآخر 20% من كراسي الصف والتركيز على الـ 60% الوسطى
 CENTER_SEAT_MIN_RATIO = 0.20
 CENTER_SEAT_MAX_RATIO = 0.80
 
-# الحد الأدنى لعدد الكراسي المطلوبة في الحفلة لإرسال إشعار
 MIN_SEATS_NEEDED = int(os.getenv("MIN_SEATS_NEEDED", "1"))
 
-# ملف حفظ الكراسي التي تم إرسال إشعار بها سابقاً لمنع تكرار الرسائل
 STATE_FILE = "notified_seats.json"
-
-# توقيت القاهرة (UTC+2)
+STATUS_FILE = "last_run_status.json"
 CAIRO_TZ = timezone(timedelta(hours=2))
 
 
 # ==============================================================================
-# 3. دوال مساعدة لإدارة الحالة وإرسال إشعارات تيليجرام
+# 3. STATE MANAGEMENT & TELEGRAM API
 # ==============================================================================
 
 def load_notified_state() -> Set[str]:
-    """تحميل سجل الكراسي والحفلات التي تم الإبلاغ عنها مسبقاً."""
     if os.path.exists(STATE_FILE):
         try:
             with open(STATE_FILE, "r", encoding="utf-8") as f:
                 data = json.load(f)
                 return set(data.get("notified_keys", []))
         except Exception as exc:
-            print(f"[WARN] تعذر قراءة ملف الحالة {STATE_FILE}: {exc}")
+            print(f"[WARN] Could not read {STATE_FILE}: {exc}")
     return set()
 
 
 def save_notified_state(notified_keys: Set[str]) -> None:
-    """حفظ سجل الكراسي المبلّغ عنها (مع الاحتفاظ بآخر 5000 سجل)."""
     trimmed = sorted(list(notified_keys))[-5000:]
     try:
         with open(STATE_FILE, "w", encoding="utf-8") as f:
@@ -118,16 +116,23 @@ def save_notified_state(notified_keys: Set[str]) -> None:
                 indent=2,
             )
     except Exception as exc:
-        print(f"[WARN] تعذر حفظ ملف الحالة {STATE_FILE}: {exc}")
+        print(f"[WARN] Could not save {STATE_FILE}: {exc}")
+
+
+def save_run_status(status_data: Dict[str, Any]) -> None:
+    try:
+        with open(STATUS_FILE, "w", encoding="utf-8") as f:
+            json.dump(status_data, f, ensure_ascii=False, indent=2)
+    except Exception as exc:
+        print(f"[WARN] Could not save {STATUS_FILE}: {exc}")
 
 
 def send_telegram_message(text: str) -> bool:
-    """إرسال رسالة فورية إلى المستخدم عبر بوت تيليجرام."""
     if not TELEGRAM_BOT_TOKEN or "PUT_YOUR" in TELEGRAM_BOT_TOKEN:
-        print("[ERROR] لم يتم ضبط TELEGRAM_BOT_TOKEN.")
+        print("[ERROR] TELEGRAM_BOT_TOKEN is not configured.")
         return False
     if not TELEGRAM_CHAT_ID or "PUT_YOUR" in TELEGRAM_CHAT_ID:
-        print("[ERROR] لم يتم ضبط TELEGRAM_CHAT_ID.")
+        print("[ERROR] TELEGRAM_CHAT_ID is not configured.")
         return False
 
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
@@ -140,24 +145,21 @@ def send_telegram_message(text: str) -> bool:
     try:
         resp = requests.post(url, json=payload, timeout=15)
         if resp.status_code == 200:
-            print("[OK] تم إرسال إشعار تيليجرام بنجاح.")
+            print("[OK] Telegram notification sent successfully.")
             return True
-        print(f"[ERROR] فشل إرسال تيليجرام ({resp.status_code}): {resp.text}")
+        print(f"[ERROR] Telegram API failed ({resp.status_code}): {resp.text}")
     except Exception as exc:
-        print(f"[ERROR] استثناء أثناء إرسال تيليجرام: {exc}")
+        print(f"[ERROR] Exception sending Telegram message: {exc}")
     return False
 
 
 # ==============================================================================
-# 4. تحليل وتصنيف الكراسي (Seat Filtering & Evaluation)
+# 4. SEAT PARSING & QUALITY FILTERING
 # ==============================================================================
 
 def parse_seat_code(raw_code: str) -> Tuple[str, Optional[int]]:
-    """
-    استخراج رمز الصف ورقم الكرسي من كود مثل 'H12' أو 'Row H - Seat 12' أو 'H-12'.
-    """
     cleaned = raw_code.strip().upper()
-    match = re.search(r"([A-Z]{1,2})\s*[-:]?\s*(\d{1,2})", cleaned)
+    match = re.search(r"\b([A-Z]{1,2})\s*[-:]?\s*(\d{1,2})\b", cleaned)
     if match:
         return match.group(1), int(match.group(2))
     return cleaned, None
@@ -168,17 +170,10 @@ def evaluate_seat_quality(
     seat_num: Optional[int],
     max_seats_in_row: int = 18,
 ) -> Tuple[bool, str]:
-    """
-    تحديد ما إذا كان الكرسي في موقع ممتاز (المنتصف أو الخلف) وليس في الصفوف الأمامية.
-    يرجع: (هل_مقبول, وصف_الموقع)
-    """
     row_clean = row_label.strip().upper()
-
-    # 1. استبعاد الصفوف الأمامية (A, B, C, D)
     if row_clean in EXCLUDED_FRONT_ROWS:
         return False, "صف أمامي (مستبعد)"
 
-    # 2. التحقق من تمركز الكرسي أفقياً (تجنب الأطراف الجانبية قدر الإمكان)
     is_center_horizontal = True
     if seat_num is not None and max_seats_in_row >= 8:
         min_center = max(2, int(round(max_seats_in_row * CENTER_SEAT_MIN_RATIO)))
@@ -188,7 +183,6 @@ def evaluate_seat_quality(
         )
         is_center_horizontal = min_center <= seat_num <= max_center
 
-    # 3. تصنيف جودة الصف
     if row_clean in SWEET_SPOT_ROWS:
         if is_center_horizontal:
             return True, "🌟 مثالي (منتصف القاعة - Sweet Spot)"
@@ -202,25 +196,25 @@ def evaluate_seat_quality(
     return False, "غير مطابق لمعايير الصفوف"
 
 
-def filter_and_rank_seats(available_seats: List[Dict[str, str]]) -> List[Dict[str, str]]:
-    """
-    فلترة قائمة الكراسي المتاحة وإرجاع الكراسي الواقعة في النص أو الخلف فقط،
-    مرتبة حسب الأفضلية (Sweet Spot المنتصف أولاً).
-    """
+def filter_and_rank_seats(available_seats: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     row_max_seat: Dict[str, int] = {}
     for s in available_seats:
-        r_label = s.get("row", "").upper()
+        r_label = str(s.get("row", "")).upper()
         s_num = s.get("number")
         if r_label and isinstance(s_num, int):
             row_max_seat[r_label] = max(row_max_seat.get(r_label, 16), s_num)
 
-    good_seats: List[Dict[str, str]] = []
+    good_seats: List[Dict[str, Any]] = []
+    seen_codes: Set[str] = set()
     for seat in available_seats:
-        row_label = seat.get("row", "").upper()
+        row_label = str(seat.get("row", "")).upper()
         seat_num = seat.get("number")
-        code = seat.get("code", f"{row_label}{seat_num or ''}")
-        max_in_row = row_max_seat.get(row_label, 18)
+        code = str(seat.get("code", f"{row_label}{seat_num or ''}")).upper()
+        if code in seen_codes:
+            continue
+        seen_codes.add(code)
 
+        max_in_row = row_max_seat.get(row_label, 18)
         is_good, quality_desc = evaluate_seat_quality(row_label, seat_num, max_in_row)
         if is_good:
             good_seats.append(
@@ -243,110 +237,144 @@ def filter_and_rank_seats(available_seats: List[Dict[str, str]]) -> List[Dict[st
 
 
 # ==============================================================================
-# 5. استخراج الحفلات والكراسي من موقع VOX Cinemas Egypt باستخدام Playwright
+# 5. HTML SHOWTIME PARSER (RESILIENT TO VOX DOM STRUCTURE)
 # ==============================================================================
 
-def parse_showtimes_from_html(html: str, page_url: str) -> List[Dict[str, str]]:
-    """
-    استخراج جميع الحفلات المعروضة في صفحة الفيلم لفرع City Centre Almaza فقط.
-    """
+def detect_experience_for_link(link_tag: Tag) -> str:
+    """Walk up parents from a booking link to find the experience name (MAX, Standard, GOLD, IMAX)."""
+    curr: Optional[Tag] = link_tag
+    for _ in range(5):
+        if curr is None:
+            break
+        # Check strong/span/h4/img inside this parent block, excluding time strings
+        for label_el in curr.find_all(["strong", "span", "h4", "div", "img"], recursive=False):
+            raw = (label_el.get("alt") or label_el.get_text(" ", strip=True) or "").upper()
+            if not raw or re.search(r"^\d{1,2}:\d{2}", raw):
+                continue
+            if "IMAX" in raw:
+                return "IMAX"
+            if "MAX" in raw:
+                return "MAX"
+            if "GOLD" in raw:
+                return "GOLD"
+            if "4DX" in raw:
+                return "4DX"
+            if "KIDS" in raw:
+                return "KIDS"
+            if "STANDARD" in raw:
+                return "Standard"
+        curr = curr.parent
+
+    # Fallback: check full text of ancestor li
+    li_parent = link_tag.find_parent("li")
+    if li_parent:
+        outer_li = li_parent.find_parent("li") or li_parent
+        text_upper = outer_li.get_text(" ", strip=True).upper()
+        if "IMAX" in text_upper:
+            return "IMAX"
+        if "MAX" in text_upper:
+            return "MAX"
+        if "GOLD" in text_upper:
+            return "GOLD"
+        if "4DX" in text_upper:
+            return "4DX"
+        if "KIDS" in text_upper:
+            return "KIDS"
+    return "Standard"
+
+
+def detect_cinema_for_link(link_tag: Tag) -> str:
+    """Find the closest preceding cinema heading (e.g., City Centre Almaza, Mall of Egypt)."""
+    for prev in link_tag.find_all_previous(["h3", "h2"]):
+        txt = " ".join(prev.get_text().split())
+        if any(
+            branch in txt.lower()
+            for branch in ["city centre almaza", "mall of egypt", "city centre alexandria"]
+        ):
+            return txt
+    return ""
+
+
+def parse_showtimes_from_html(
+    html: str,
+    page_url: str,
+    fallback_date_code: str = "",
+) -> List[Dict[str, Any]]:
     soup = BeautifulSoup(html, "html.parser")
-    sessions: List[Dict[str, str]] = []
+    sessions: List[Dict[str, Any]] = []
 
-    active_date_label = "غير محدد"
-    active_date_code = ""
-    date_el = soup.select_one(
-        ".dates a.active, .dates li.active a, nav.dates a.selected, [data-ShowtimeDate].active"
-    )
-    if date_el:
-        active_date_label = " ".join(date_el.get_text().split())
-        href = date_el.get("href", "")
-        m_date = re.search(r"d=(\d{8})", href)
-        if m_date:
-            active_date_code = m_date.group(1)
+    # Determine active date label and YYYYMMDD code
+    active_date_label = fallback_date_code or "غير محدد"
+    active_date_code = fallback_date_code
 
-    cinema_headers = soup.find_all(["h3", "h2", "div"], class_=re.compile(r"highlight|cinema|location", re.I))
-    if not cinema_headers:
-        cinema_headers = soup.find_all(["h3", "h2"])
+    m_url_date = re.search(r"d=(\d{8})", page_url)
+    if m_url_date:
+        active_date_code = m_url_date.group(1)
 
-    for header in cinema_headers:
-        cinema_name = " ".join(header.get_text().split())
+    for a_date in soup.select("a[href*='?d=']"):
+        href = a_date.get("href", "")
+        cls = " ".join(a_date.get("class", [])).lower()
+        parent_cls = " ".join(a_date.parent.get("class", [])).lower() if a_date.parent else ""
+        if (
+            (active_date_code and active_date_code in href)
+            or "active" in cls
+            or "selected" in cls
+            or "active" in parent_cls
+        ):
+            active_date_label = " ".join(a_date.get_text().split())
+            m_d = re.search(r"d=(\d{8})", href)
+            if m_d and not active_date_code:
+                active_date_code = m_d.group(1)
+            break
+
+    # Find every booking link on the page and match its branch + experience
+    for link in soup.find_all("a", href=re.compile(r"/booking/", re.I)):
+        show_time = " ".join(link.get_text().split())
+        if not re.search(r"\d{1,2}:\d{2}", show_time):
+            continue
+
+        cinema_name = detect_cinema_for_link(link)
         if not any(tc.lower() in cinema_name.lower() for tc in TARGET_CINEMAS):
             continue
 
-        container = header.find_next_sibling(["ol", "ul", "div"]) or header.parent
-        if not container:
+        detected_exp = detect_experience_for_link(link)
+        if detected_exp.upper() not in [e.upper() for e in TARGET_EXPERIENCES]:
             continue
 
-        for exp_block in container.find_all(["li", "div"], recursive=True):
-            links = exp_block.find_all("a", href=re.compile(r"/booking/|showtime", re.I), recursive=False)
-            if not links:
-                links = [
-                    a for a in exp_block.find_all("a", class_=re.compile(r"showtime|action", re.I))
-                    if re.search(r"\d{1,2}:\d{2}\s*(am|pm)", a.get_text(), re.I)
-                ]
-            if not links:
-                continue
+        if TARGET_TIMES and not any(t.lower() in show_time.lower() for t in TARGET_TIMES):
+            continue
 
-            exp_tag = exp_block.find(["strong", "span", "h4", "img"])
-            experience_raw = exp_tag.get_text(" ", strip=True) if exp_tag else exp_block.get_text(" ", strip=True)
-            experience_upper = experience_raw.upper()
+        href = link.get("href", "")
+        booking_url = urljoin("https://egy.voxcinemas.com", href)
+        session_id = link.get("data-id") or href.rstrip("/").split("/")[-1]
 
-            detected_exp = "Standard"
-            if "IMAX" in experience_upper:
-                detected_exp = "IMAX"
-            elif "MAX" in experience_upper:
-                detected_exp = "MAX"
-            elif "GOLD" in experience_upper:
-                detected_exp = "GOLD"
-            elif "4DX" in experience_upper:
-                detected_exp = "4DX"
-            elif "KIDS" in experience_upper:
-                detected_exp = "KIDS"
-
-            if detected_exp.upper() not in [e.upper() for e in TARGET_EXPERIENCES]:
-                continue
-
-            for link in links:
-                show_time = " ".join(link.get_text().split())
-                if not re.search(r"\d{1,2}:\d{2}", show_time):
-                    continue
-
-                if TARGET_TIMES and not any(t.lower() in show_time.lower() for t in TARGET_TIMES):
-                    continue
-
-                href = link.get("href", "")
-                booking_url = (
-                    href if href.startswith("http") else f"https://egy.voxcinemas.com{href}"
-                )
-                session_id = link.get("data-id") or href.split("/")[-1]
-
-                sessions.append(
-                    {
-                        "cinema": cinema_name,
-                        "experience": detected_exp,
-                        "is_max": detected_exp.upper() == "MAX",
-                        "date_label": active_date_label,
-                        "date_code": active_date_code,
-                        "time": show_time,
-                        "booking_url": booking_url,
-                        "session_id": session_id,
-                        "movie_url": page_url,
-                    }
-                )
+        sessions.append(
+            {
+                "cinema": cinema_name,
+                "experience": detected_exp,
+                "is_max": detected_exp.upper() == "MAX",
+                "date_label": active_date_label,
+                "date_code": active_date_code,
+                "time": show_time,
+                "booking_url": booking_url,
+                "session_id": session_id,
+                "movie_url": page_url,
+            }
+        )
 
     unique_sessions = {}
     for s in sessions:
-        key = f"{s['cinema']}_{s['experience']}_{s['date_label']}_{s['time']}_{s['booking_url']}"
+        key = f"{s['cinema']}_{s['experience']}_{s['date_code']}_{s['time']}_{s['booking_url']}"
         unique_sessions[key] = s
     return list(unique_sessions.values())
 
 
-def extract_seats_from_booking_page(page: Page, booking_url: str) -> List[Dict[str, str]]:
-    """
-    فتح صفحة الحفلة واستخراج الكراسي المتاحة (سواء من استجابة JSON الخاصة بـ Vista API أو من عناصر الـ DOM/SVG).
-    """
-    captured_api_seats: List[Dict[str, str]] = []
+# ==============================================================================
+# 6. SEAT MAP EXTRACTION (/booking/... -> Continue As Guest -> /seats#guest)
+# ==============================================================================
+
+def extract_seats_from_booking_page(page: Page, booking_url: str) -> List[Dict[str, Any]]:
+    captured_api_seats: List[Dict[str, Any]] = []
 
     def handle_response(response: Response) -> None:
         try:
@@ -361,52 +389,64 @@ def extract_seats_from_booking_page(page: Page, booking_url: str) -> List[Dict[s
     page.on("response", handle_response)
     try:
         page.goto(booking_url, wait_until="domcontentloaded", timeout=35000)
-        page.wait_for_timeout(4000)
+        page.wait_for_timeout(2500)
 
-        continue_btn = page.query_selector(
-            "button.action.primary, a.action.primary, button:has-text('Continue'), button:has-text('Choose Seats')"
-        )
-        if continue_btn and continue_btn.is_visible():
-            try:
-                continue_btn.click(timeout=5000)
+        # Step 1: If redirected to /guest ("Continue As Guest"), navigate to /seats#guest or click button
+        if "/guest" in page.url:
+            seats_url = page.url.split("?")[0].rstrip("/")
+            if seats_url.endswith("/guest"):
+                seats_url = seats_url[:-6] + "/seats#guest"
+                page.goto(seats_url, wait_until="domcontentloaded", timeout=30000)
                 page.wait_for_timeout(3000)
-            except Exception:
-                pass
+            else:
+                guest_btn = page.query_selector(
+                    "a:has-text('Continue As Guest'), button:has-text('Continue As Guest'), a[href*='seats']"
+                )
+                if guest_btn:
+                    guest_btn.click(timeout=5000)
+                    page.wait_for_timeout(3000)
 
         if captured_api_seats:
             return captured_api_seats
 
+        # Step 2: Extract seats from the DOM / SVG seat plan
         dom_seats = page.evaluate(
             """() => {
                 const results = [];
                 const seatSelectors = [
                     '[data-seat]',
                     '[data-row]',
-                    '.seat',
                     'li.seat',
                     'span.seat',
+                    'a.seat',
                     'button.seat',
+                    'div.seat',
                     'g.seat',
-                    'svg [id*="seat" i]'
+                    'svg [data-row]',
+                    'svg [id*="seat" i]',
+                    '.seat-plan [class*="seat" i]'
                 ];
                 const elements = document.querySelectorAll(seatSelectors.join(','));
                 elements.forEach(el => {
                     const cls = (el.className && typeof el.className === 'string')
                         ? el.className.toLowerCase()
                         : (el.getAttribute('class') || '').toLowerCase();
-                    const statusAttr = (el.getAttribute('data-status') || el.getAttribute('aria-disabled') || '').toLowerCase();
+                    const statusAttr = (
+                        (el.getAttribute('data-status') || '') + ' ' +
+                        (el.getAttribute('aria-disabled') || '') + ' ' +
+                        (el.getAttribute('title') || '')
+                    ).toLowerCase();
 
-                    const isTaken = ['sold', 'occupied', 'unavailable', 'taken', 'reserved', 'blocked', 'broken', 'true', 'wheelchair']
-                        .some(word => cls.includes(word) || statusAttr.includes(word));
+                    const isTaken = [
+                        'sold', 'occupied', 'unavailable', 'taken',
+                        'reserved', 'blocked', 'broken', 'wheelchair', 'companion'
+                    ].some(word => cls.includes(word) || statusAttr.includes(word));
                     if (isTaken) return;
-
-                    const isAvailable = ['available', 'free', 'open', 'standard', 'premium', 'seat']
-                        .some(word => cls.includes(word) || statusAttr.includes(word));
-                    if (!isAvailable) return;
 
                     const row = el.getAttribute('data-row')
                         || el.getAttribute('data-row-name')
                         || (el.closest('[data-row]') ? el.closest('[data-row]').getAttribute('data-row') : '')
+                        || (el.closest('tr') ? (el.closest('tr').getAttribute('data-row') || '') : '')
                         || '';
                     const num = el.getAttribute('data-seat')
                         || el.getAttribute('data-number')
@@ -418,23 +458,23 @@ def extract_seats_from_booking_page(page: Page, booking_url: str) -> List[Dict[s
                         || `${row}${num}`;
 
                     if (row || label) {
-                        results.push({ row: row, num: num, label: label });
+                        results.push({ row: row, num: num, label: label, cls: cls });
                     }
                 });
                 return results;
             }"""
         )
 
-        parsed_dom_seats: List[Dict[str, str]] = []
+        parsed_dom_seats: List[Dict[str, Any]] = []
         for item in dom_seats:
             raw_label = item.get("label") or f"{item.get('row', '')}{item.get('num', '')}"
             row_label, seat_num = parse_seat_code(raw_label)
-            if not row_label and item.get("row"):
+            if (not row_label or len(row_label) > 2) and item.get("row"):
                 row_label = str(item["row"]).strip().upper()
             if seat_num is None and str(item.get("num", "")).isdigit():
                 seat_num = int(item["num"])
 
-            if row_label and len(row_label) <= 2:
+            if row_label and 1 <= len(row_label) <= 2 and row_label.isalpha():
                 code = f"{row_label}{seat_num}" if seat_num is not None else raw_label
                 parsed_dom_seats.append(
                     {
@@ -447,7 +487,7 @@ def extract_seats_from_booking_page(page: Page, booking_url: str) -> List[Dict[s
         return parsed_dom_seats
 
     except Exception as exc:
-        print(f"[WARN] تعذر فحص صفحة الكراسي {booking_url}: {exc}")
+        print(f"[WARN] Could not inspect seat map {booking_url}: {exc}")
         return []
     finally:
         try:
@@ -456,8 +496,7 @@ def extract_seats_from_booking_page(page: Page, booking_url: str) -> List[Dict[s
             pass
 
 
-def parse_json_seats(data: object, out_list: List[Dict[str, str]]) -> None:
-    """البحث التكراري في استجابات JSON عن الكراسي المتاحة (Available Seats)."""
+def parse_json_seats(data: object, out_list: List[Dict[str, Any]]) -> None:
     if isinstance(data, dict):
         status = str(data.get("status", data.get("seatStatus", data.get("isAvailable", "")))).lower()
         row = data.get("row", data.get("rowName", data.get("physicalRowId", "")))
@@ -484,11 +523,10 @@ def parse_json_seats(data: object, out_list: List[Dict[str, str]]) -> None:
 
 
 # ==============================================================================
-# 6. حلقة الفحص الرئيسية (Main Monitoring Routine)
+# 7. MAIN MONITORING LOOP
 # ==============================================================================
 
 def format_day_and_date(date_label: str, date_code: str) -> str:
-    """تنسيق اليوم والتاريخ بشكل واضح باللغتين العربية والإنجليزية."""
     arabic_days = {
         "Mon": "الإثنين",
         "Tue": "الثلاثاء",
@@ -511,21 +549,31 @@ def format_day_and_date(date_label: str, date_code: str) -> str:
 
 def run_watcher() -> None:
     if sync_playwright is None:
-        raise RuntimeError("يرجى تثبيت مكتبة playwright أولاً: pip install playwright && playwright install chromium")
+        raise RuntimeError("Playwright is not installed.")
 
     now_cairo = datetime.now(CAIRO_TZ).strftime("%Y-%m-%d %I:%M:%S %p")
-    print(f"=== بدء فحص VOX Cinemas City Centre Almaza ({now_cairo} بتوقيت القاهرة) ===")
+    print(f"=== Starting VOX Cinemas City Centre Almaza Watcher ({now_cairo} Cairo Time) ===")
 
     notified_keys = load_notified_state()
     new_notifications_sent = 0
+    diagnostics: Dict[str, Any] = {
+        "last_run_cairo": now_cairo,
+        "pages_checked": [],
+        "sessions_discovered_count": 0,
+        "sessions_discovered": [],
+        "new_notifications_sent": 0,
+    }
+
+    use_headed = os.getenv("DISPLAY") is not None
 
     with sync_playwright() as p:
         browser = p.chromium.launch(
-            headless=True,
+            headless=not use_headed,
             args=[
                 "--no-sandbox",
                 "--disable-setuid-sandbox",
                 "--disable-blink-features=AutomationControlled",
+                "--window-size=1366,900",
             ],
         )
         context = browser.new_context(
@@ -537,57 +585,93 @@ def run_watcher() -> None:
             viewport={"width": 1366, "height": 900},
             locale="en-US",
         )
+        # Mask navigator.webdriver to avoid Cloudflare headless blocks
+        context.add_init_script(
+            "Object.defineProperty(navigator, 'webdriver', {get: () => undefined});"
+        )
         page = context.new_page()
 
-        all_discovered_sessions: List[Dict[str, str]] = []
+        all_discovered_sessions: List[Dict[str, Any]] = []
 
         for movie_url in MOVIE_URLS:
-            print(f"[INFO] جاري فتح صفحة الفيلم: {movie_url}")
+            print(f"[INFO] Checking base movie URL: {movie_url}")
             try:
                 resp = page.goto(movie_url, wait_until="domcontentloaded", timeout=35000)
-                if not resp or resp.status >= 400:
-                    print(f"[INFO] الصفحة {movie_url} غير متاحة حالياً (Status: {resp.status if resp else 'None'}).")
-                    continue
+                status_code = resp.status if resp else 0
                 page.wait_for_timeout(3000)
+                page_title = page.title()
+                print(f"[INFO] Loaded {movie_url} | Status: {status_code} | Title: {page_title}")
+
+                diagnostics["pages_checked"].append(
+                    {"url": movie_url, "status": status_code, "title": page_title}
+                )
+
+                if status_code >= 400 and "just a moment" not in page_title.lower():
+                    continue
+
+                # If Cloudflare challenge appears, wait a few seconds for it to resolve
+                if "just a moment" in page_title.lower():
+                    page.wait_for_timeout(6000)
 
                 html = page.content()
                 soup = BeautifulSoup(html, "html.parser")
 
-                date_links: List[Tuple[str, str]] = []
-                for a_el in soup.select(".dates a[href*='?d='], a[href*='?d=']"):
+                # Collect date codes from page + default early booking dates
+                dates_to_check: List[str] = list(DEFAULT_EARLY_BOOKING_DATES)
+                for a_el in soup.select("a[href*='?d=']"):
                     href = a_el.get("href", "")
                     m_d = re.search(r"d=(\d{8})", href)
-                    if m_d:
-                        d_code = m_d.group(1)
-                        if TARGET_DATES and d_code not in TARGET_DATES:
-                            continue
-                        full_d_url = (
-                            href if href.startswith("http") else f"https://egy.voxcinemas.com{href}"
-                        )
-                        date_links.append((d_code, full_d_url))
+                    if m_d and m_d.group(1) not in dates_to_check:
+                        dates_to_check.append(m_d.group(1))
 
+                if TARGET_DATES:
+                    dates_to_check = [d for d in dates_to_check if d in TARGET_DATES]
+
+                # Also parse default landing page
                 all_discovered_sessions.extend(parse_showtimes_from_html(html, movie_url))
 
-                seen_dates = set()
-                for d_code, d_url in date_links:
-                    if d_code in seen_dates:
-                        continue
-                    seen_dates.add(d_code)
+                # Visit each date URL explicitly using proper query string resolution
+                for d_code in dates_to_check:
+                    d_url = f"{movie_url}?d={d_code}"
                     try:
-                        page.goto(d_url, wait_until="domcontentloaded", timeout=30000)
+                        d_resp = page.goto(d_url, wait_until="domcontentloaded", timeout=30000)
                         page.wait_for_timeout(2000)
-                        all_discovered_sessions.extend(
-                            parse_showtimes_from_html(page.content(), d_url)
+                        d_sessions = parse_showtimes_from_html(
+                            page.content(), d_url, fallback_date_code=d_code
                         )
+                        print(
+                            f"[INFO] Date {d_code}: found {len(d_sessions)} matching session(s) at City Centre Almaza"
+                        )
+                        all_discovered_sessions.extend(d_sessions)
                     except Exception as d_exc:
-                        print(f"[WARN] تعذر تحميل تاريخ {d_code}: {d_exc}")
+                        print(f"[WARN] Failed loading date {d_code}: {d_exc}")
 
             except Exception as exc:
-                print(f"[WARN] خطأ أثناء فحص {movie_url}: {exc}")
+                print(f"[WARN] Error checking {movie_url}: {exc}")
+                diagnostics["pages_checked"].append({"url": movie_url, "error": str(exc)})
 
-        print(f"[INFO] إجمالي حفلات City Centre Almaza المكتشفة: {len(all_discovered_sessions)}")
+        # Deduplicate discovered sessions across all dates
+        unique_map = {}
+        for s in all_discovered_sessions:
+            k = f"{s['cinema']}_{s['experience']}_{s['date_code']}_{s['time']}_{s['session_id']}"
+            unique_map[k] = s
+        deduped_sessions = list(unique_map.values())
 
-        for session in all_discovered_sessions:
+        diagnostics["sessions_discovered_count"] = len(deduped_sessions)
+        diagnostics["sessions_discovered"] = [
+            {
+                "cinema": s["cinema"],
+                "experience": s["experience"],
+                "date": s["date_label"],
+                "date_code": s["date_code"],
+                "time": s["time"],
+                "booking_url": s["booking_url"],
+            }
+            for s in deduped_sessions
+        ]
+        print(f"[INFO] Total unique City Centre Almaza sessions found: {len(deduped_sessions)}")
+
+        for session in deduped_sessions:
             cinema = session["cinema"]
             experience = session["experience"]
             is_max = session["is_max"]
@@ -598,6 +682,9 @@ def run_watcher() -> None:
             print(f"[CHECK] {cinema} | {experience} | {date_str} | {show_time}")
             raw_seats = extract_seats_from_booking_page(page, booking_url)
             good_seats = filter_and_rank_seats(raw_seats)
+            print(
+                f"   -> Raw available seats: {len(raw_seats)} | Ideal middle/back seats: {len(good_seats)}"
+            )
 
             unnotified_good_seats = []
             for seat in good_seats:
@@ -638,9 +725,13 @@ def run_watcher() -> None:
                     new_notifications_sent += 1
 
             elif not raw_seats:
-                session_open_key = f"SESSION_OPEN_{cinema}_{experience}_{session['date_code']}_{show_time}"
+                session_open_key = (
+                    f"SESSION_OPEN_{cinema}_{experience}_{session['date_code']}_{show_time}"
+                )
                 if session_open_key not in notified_keys:
-                    max_badge = "✅ <b>نعم (قاعة MAX 🔊)</b>" if is_max else f"لا (<b>{experience}</b>)"
+                    max_badge = (
+                        "✅ <b>نعم (قاعة MAX 🔊)</b>" if is_max else f"لا (<b>{experience}</b>)"
+                    )
                     msg = (
                         f"🎟 <b>حفلة متاحة للحجز المبكر — Avengers: Doomsday!</b>\n\n"
                         f"📍 <b>السينما:</b> {cinema}\n"
@@ -655,8 +746,10 @@ def run_watcher() -> None:
 
         browser.close()
 
+    diagnostics["new_notifications_sent"] = new_notifications_sent
     save_notified_state(notified_keys)
-    print(f"=== انتهى الفحص. عدد الإشعارات الجديدة المرسلة: {new_notifications_sent} ===")
+    save_run_status(diagnostics)
+    print(f"=== Scan Complete. New notifications sent: {new_notifications_sent} ===")
 
 
 if __name__ == "__main__":
