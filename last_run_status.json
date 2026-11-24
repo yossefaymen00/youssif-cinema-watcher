@@ -1,6 +1,6 @@
 {
   "version": "v4-screen-distance-aware",
-  "last_run_cairo": "2026-11-24 07:36:52 AM",
+  "last_run_cairo": "2026-11-24 06:20:42 PM",
   "pages_checked": [
     {
       "url": "https://egy.voxcinemas.com/movies/avengers-doomsday",
@@ -13,7 +13,7 @@
       "title": "Avengers: Doomsday (Infinity Vision) | Now Showing | Book Tickets | VOX Cinemas Egypt"
     }
   ],
-  "sessions_discovered_count": 22,
+  "sessions_discovered_count": 19,
   "sessions_with_ideal_seats": [],
   "new_notifications_sent": 0
 }
